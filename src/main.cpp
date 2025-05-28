@@ -1,95 +1,121 @@
-#include <WiFi.h>
-#include <HTTPClient.h>
-#include <ArduinoJson.h>
-#include <LovyanGFX.hpp>
-#include "GC9A01_XIAO_ESP32C3.hpp"  // From PrintMinion fork
+#include <Arduino.h>         // Required for delay(), Serial, etc.
+#include <WiFiManager.h>     // Captive portal WiFi config
+#include <ArduinoJson.h>     // JSON parsing for Tempest API
+#include <HTTPClient.h>      // Needed for HTTP requests
+#include <LovyanGFX.hpp>     // LovyanGFX display framework
+#include "lgfx_user_setup.h" // Custom pinout and TFT setup
 
-GC9A01_XIAO_ESP32C3 lcd;
+LGFX tft;
 
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-const char* api_token = "Bearer YOUR_API_TOKEN";  // Include "Bearer " prefix
-const char* api_url = "https://swd.weatherflow.com/swd/rest/observations/station/170405";
+// 🌤️ Tempest Station API URL (replace with another if gifting multiple)
+const char* TEMPEST_API_URL = "https://swd.weatherflow.com/swd/rest/observations/station/170405";
 
-#define BG_COLOR TFT_BLACK
-#define TEXT_COLOR TFT_WHITE
-
-void connectWiFi();
-void fetchAndDrawWeather();
-void drawWeatherScreen(float temp, int humidity);
+void fetchAndDisplayWeather();
 
 void setup() {
   Serial.begin(115200);
-  lcd.init();
-  lcd.setRotation(0);
-  lcd.fillScreen(BG_COLOR);
+  delay(1000);
+  Serial.println("🌈 Booting up Tempest Display...");
 
-  connectWiFi();
-  delay(500);
-  fetchAndDrawWeather();
-}
+  tft.init();
+  tft.setRotation(0);  // Adjust as needed for screen orientation
+  tft.fillScreen(TFT_WHITE);
+  tft.setTextColor(TFT_BLACK);
+  tft.setFont(&fonts::Font2);  // Make it larger and better aligned
+  String msg = "Connecting WiFi...";
+  int16_t msgX = (240 - tft.textWidth(msg)) / 2;
+  tft.drawString(msg, msgX, 30);  // Adjust Y as needed
+ 
 
-void loop() {
-  delay(60000); // Update every 60 sec
-  fetchAndDrawWeather();
-}
-
-void connectWiFi() {
-  WiFi.begin(ssid, password);
-  lcd.setTextSize(2);
-  lcd.setTextColor(TEXT_COLOR);
-  lcd.setCursor(20, 100);
-  lcd.println("Connecting to WiFi...");
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    lcd.print(".");
+  // 📶 Auto-start WiFiManager portal if no credentials stored
+  WiFiManager wm;
+  if (!wm.autoConnect("Tempest-Setup")) {
+    Serial.println("❌ WiFi connect failed. Rebooting...");
+    // If WiFi fails
+    tft.fillScreen(TFT_WHITE);
+    tft.setTextColor(TFT_RED);
+    tft.setFont(&fonts::Font2);
+    String failMsg = "WiFi Failed!";
+    int16_t failX = (240 - tft.textWidth(failMsg)) / 2;
+    tft.drawString(failMsg, failX, 60);
+    delay(3000);
+    ESP.restart();
   }
 
-  lcd.fillScreen(BG_COLOR);
-  lcd.setCursor(20, 100);
-  lcd.println("WiFi Connected!");
-  delay(1000);
-  lcd.fillScreen(BG_COLOR);
-}
+  Serial.println("✅ WiFi Connected!");
+  tft.fillScreen(TFT_BLACK);
+    // On WiFi success
+  tft.fillScreen(TFT_WHITE);
+  tft.setTextColor(TFT_BLACK);
+  tft.setFont(&fonts::Font2);
+  String successMsg = "WiFi Connected!";
+  int16_t successX = (240 - tft.textWidth(successMsg)) / 2;
+  tft.drawString(successMsg, successX, 60);
 
-void fetchAndDrawWeather() {
+  // 🌦️ Pull current weather and display
+  fetchAndDisplayWeather();
+}
+void fetchAndDisplayWeather() {
   HTTPClient http;
-  http.begin(api_url);
-  http.addHeader("Authorization", api_token);
+  http.begin(TEMPEST_API_URL);
   int httpCode = http.GET();
 
-  if (httpCode == 200) {
+  tft.setFont(&fonts::Font2); // 🔠 Larger font
+
+  if (httpCode > 0) {
     String payload = http.getString();
-    DynamicJsonDocument doc(2048);
-    deserializeJson(doc, payload);
+    Serial.println("📡 Weather API Response:");
+    Serial.println(payload);
 
-    float temp = doc["obs"][0]["air_temperature"];
-    int humidity = doc["obs"][0]["humidity"];
+    DynamicJsonDocument doc(4096);
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+      Serial.println("❌ JSON Parse Failed!");
+      tft.fillScreen(TFT_BLACK);
+      tft.drawString("JSON Error!", 10, 20);
+      return;
+    }
 
-    drawWeatherScreen(temp, humidity);
+    float temp_c   = doc["obs"][0]["air_temperature"].as<float>();
+    float wind_kph = doc["obs"][0]["wind_avg"].as<float>() * 3.6;
+    float pressure = doc["obs"][0]["sea_level_pressure"].as<float>();
+
+    tft.fillScreen(TFT_WHITE);
+    tft.setTextColor(TFT_DARKCYAN);
+    String tempText = "Temp: " + String(temp_c) + "°C";
+    int16_t x1 = (240 - tft.textWidth(tempText)) / 2;
+    tft.drawString(tempText, x1, 10);
+
+    String windText = "Wind: " + String(wind_kph) + " km/h";
+    int16_t x2 = (240 - tft.textWidth(windText)) / 2;
+    tft.drawString(windText, x2, 40);
+
+    String pressureText = "Pressure: " + String(pressure) + " hPa";
+    int16_t x3 = (240 - tft.textWidth(pressureText)) / 2;
+    tft.drawString(pressureText, x3, 70);
+
+    // ➖ Divider line
+    tft.drawLine(10, 105, 230, 105, TFT_WHITE);
+
+    // 🔊 BRIGHT ALERT!
+    tft.setTextColor(TFT_RED);
+    tft.setFont(&fonts::Font4);  // or Font6 for MAXYELL
+    String msg = "OK MATT, I NEED";
+    int16_t msgX = (240 - tft.textWidth(msg)) / 2;
+    tft.drawString(msg, msgX, 115);
+
+    String msg2 = "YOUR API KEY!";
+    int16_t msg2X = (240 - tft.textWidth(msg2)) / 2;
+    tft.drawString(msg2, msg2X, 145);
   } else {
-    lcd.fillScreen(BG_COLOR);
-    lcd.setCursor(10, 100);
-    lcd.setTextSize(2);
-    lcd.setTextColor(TFT_RED);
-    lcd.println("API Error!");
+    Serial.println("❌ Failed to connect to API.");
+    tft.fillScreen(TFT_BLACK);
+    tft.drawString("API Error!", 10, 20);
   }
 
   http.end();
 }
 
-void drawWeatherScreen(float temp, int humidity) {
-  lcd.fillScreen(BG_COLOR);
-  lcd.setTextDatum(MC_DATUM);
-  lcd.setTextColor(TEXT_COLOR);
-
-  lcd.setTextSize(3);
-  lcd.drawString("Current Weather", 120, 40);
-
-  lcd.setTextSize(4);
-  lcd.drawString(String(temp, 1) + "C", 120, 100);
-
-  lcd.setTextSize(3);
-  lcd.drawString(String(humidity) + "% RH", 120, 160);
+void loop() {
+  // 🔁 Optional: refresh every few minutes if you add battery/USB power
 }
