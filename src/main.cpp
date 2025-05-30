@@ -26,7 +26,7 @@ LGFX_Sprite touchSprite(&tft);  // 👈 Fixed placement!
 
 // 🌤️ Tempest Station API URL (replace with another if gifting multiple)
 const char* TEMPEST_API_URL = "https://swd.weatherflow.com/swd/rest/observations/station/170405";
-const char* TEMPEST_API_KEY = "a0724f4f-3aa6-46e3-973f-253b0ba88717";
+const char* TEMPEST_API_KEY = "";
 
 void fetchAndDisplayWeather();
 
