@@ -43,3 +43,4 @@ public:
     setPanel(&_panel);
   }
 };
+ 
