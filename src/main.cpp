@@ -6,16 +6,17 @@
 #include "lgfx_user_setup.h" // Custom pinout and TFT setup
 #include <Ticker.h> // For debounce timing
 #include <Wire.h>
-#include "weather_icons.h"
+#include "background2.h"
+//#include "weather_icons.h"
 
 // 📲 OpenWeatherMap API for London
-const char* OPENWEATHER_API_KEY = "6fadd6bef59debaa26cad2f5fa53ff77";
+const char* OPENWEATHER_API_KEY = "OPEN_WEATHER_API_KEY";
 const char* OPENWEATHER_LONDON_URL = "http://api.openweathermap.org/data/2.5/weather?q=London,UK&units=imperial&appid=";
 
 // 🧭 Track current screen state
 int currentScreen = 0;  // 0 = San Diego (Tempest), 1 = London (OpenWeather)
 bool shouldRedraw = true;
-const uint32_t screenInterval = 10000;  // 10 seconds
+const uint32_t screenInterval = 30000;  // 30 seconds
 unsigned long lastSwitchTime = 0;  
 
 // 👈 Prep Screen
@@ -24,7 +25,7 @@ LGFX_Sprite touchSprite(&tft);
 
 // 🌤️ Tempest Station API URL (replace with another if gifting multiple)
 const char* TEMPEST_API_URL = "https://swd.weatherflow.com/swd/rest/observations/station/170405";
-const char* TEMPEST_API_KEY = "API-KEY";
+const char* TEMPEST_API_KEY = "Tempest_API_KEY";
 
 void fetchAndDisplayWeather();
 
@@ -78,18 +79,17 @@ void setup() {
 
   tft.init();
   tft.setRotation(0);  // Adjust as needed for screen orientation
-  
+
   tft.fillScreen(TFT_SKYBLUE);
   tft.setTextColor(TFT_PURPLE);
-  tft.setFont(&fonts::Font2);  
+  tft.setFont(&fonts::Font2);
 
-
-  // 🎨 Fancier "Connecting WiFi..." 
-  tft.setFont(&fonts::Font4);  // 🌟 Bigger and more stylish
+  // 🎨 "Connecting WiFi..." splash
+  tft.setFont(&fonts::Font4);
   tft.setTextColor(TFT_PURPLE);
   String msg = "Connecting WiFi...";
   int16_t msgX = (240 - tft.textWidth(msg)) / 2;
-  int16_t msgY = 105;  
+  int16_t msgY = 105;
   tft.drawString(msg, msgX, msgY);
 
   // ⚡ Animate WiFi bars
@@ -98,38 +98,60 @@ void setup() {
     delay(400);
   }
 
-  // 📶 Auto-start WiFiManager portal if no credentials stored
-  WiFiManager wm;
-  // TO reset Wifi uncomment the below line.
-  //wm.resetSettings();
+  WiFi.mode(WIFI_STA);
+  WiFi.begin();
 
-  if (!wm.autoConnect("Tempest-Setup")) {
-    Serial.println("❌ WiFi connect failed. Rebooting...");
-    // If WiFi fails
+  Serial.println("🌐 Trying saved WiFi credentials...");
+  int retries = 0;
+  while (WiFi.status() != WL_CONNECTED && retries < 20) {  // ~10s
+    delay(500);
+    Serial.print(".");
+    retries++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✅ Connected to WiFi!");
+    tft.fillScreen(TFT_SKYBLUE);
+    tft.setTextColor(TFT_PURPLE);
+    tft.setFont(&fonts::Font4);
+    String successMsg = "WiFi Connected!";
+    int16_t successX = (240 - tft.textWidth(successMsg)) / 2;
+    tft.drawString(successMsg, successX, 60);
+  } else {
+    Serial.println("\n⚠️ Saved WiFi failed. Starting WiFiManager AP...");
     tft.fillScreen(TFT_WHITE);
     tft.setTextColor(TFT_RED);
     tft.setFont(&fonts::Font2);
-    String failMsg = "WiFi Failed!";
+    String failMsg = "WiFi Setup Mode";
     int16_t failX = (240 - tft.textWidth(failMsg)) / 2;
     tft.drawString(failMsg, failX, 60);
-    delay(3000);
-    ESP.restart();
+
+    WiFiManager wm;
+    wm.setConfigPortalTimeout(300);  // 5 min timeout for safety
+
+    if (!wm.autoConnect("Tempest-Setup")) {
+      Serial.println("❌ WiFiManager failed or timed out. Restarting...");
+      tft.fillScreen(TFT_BLACK);
+      tft.setTextColor(TFT_RED);
+      tft.drawString("WiFi Failed!", 10, 60);
+      delay(3000);
+      ESP.restart();
+    } else {
+      Serial.println("✅ Connected via WiFiManager!");
+      tft.fillScreen(TFT_SKYBLUE);
+      tft.setTextColor(TFT_PURPLE);
+      tft.setFont(&fonts::Font4);
+      String successMsg = "WiFi Connected!";
+      int16_t successX = (240 - tft.textWidth(successMsg)) / 2;
+      tft.drawString(successMsg, successX, 60);
+    }
   }
 
-  Serial.println("✅ WiFi Connected!");
-  shouldRedraw = true;  // 🚀 Trigger initial screen
-  tft.fillScreen(TFT_SKYBLUE);
-  tft.setTextColor(TFT_PURPLE);
-  tft.setFont(&fonts::Font4);
-  String successMsg = "WiFi Connected!";
-  int16_t successX = (240 - tft.textWidth(successMsg)) / 2;
-  tft.drawString(successMsg, successX, 60);
+  shouldRedraw = true;
   currentScreen = 0;
-  // 🌦️ Pull current weather and display
-  fetchAndDisplayWeather();   // 🎬 Show San Diego first!
-  lastSwitchTime = millis();  // ⏰ Start the clock AFTER setup
-  shouldRedraw = false;  
-  
+  fetchAndDisplayWeather();
+  lastSwitchTime = millis();
+  shouldRedraw = false;
 }
 
 void fetchAndDisplayLondonWeather() {
@@ -139,7 +161,7 @@ void fetchAndDisplayLondonWeather() {
   http.begin(fullUrl);
   int httpCode = http.GET();
 
-  tft.setFont(&fonts::Font4);
+  tft.setFont(&fonts::Font4);  // Just for title
 
   if (httpCode > 0) {
     String payload = http.getString();
@@ -155,29 +177,24 @@ void fetchAndDisplayLondonWeather() {
       return;
     }
 
-    float temp_f   = doc["main"]["temp"].as<float>();
-    float wind_mph = doc["wind"]["speed"].as<float>();
-    float wind_d  = doc["wind"]["deg"].as<float>();
-    float pressure = doc["main"]["pressure"].as<float>();
+    float temp_f = doc["main"]["temp"].as<float>();
 
     tft.fillScreen(TFT_WHITE);
-    tft.setTextColor(TFT_BLUE);
-    tft.pushImage(0, 0, 240, 240, background);
-    String tempText = String(temp_f, 1) + " F";
-    tft.drawString(tempText, 135, 82);
-    String windText = String(wind_mph, 1);
-    String windDirText = windDirFromDegrees(wind_d);
-    tft.drawString(windText, 135, 164);
-    tft.setFont(&fonts::Font2);
-    tft.setTextColor(TFT_BLACK);
-    tft.drawString(windDirText, 175, 164);
-    tft.setFont(&fonts::Font4);
-    tft.setTextColor(TFT_BLUE);
+    tft.setSwapBytes(true);
+    tft.pushImage(0, 0, 240, 240, background2);
 
-    String pressureText = String(((pressure)* 0.145038),1) ;
-    
-    tft.drawString(pressureText, 130, 122);
+    tft.setTextColor(TFT_NAVY);
+    tft.setFont(&fonts::Font6);  // Big temp
+    tft.setTextSize(2);
+    String tempText = String(temp_f, 1) + " F";
+    int16_t tempX = (240 - tft.textWidth(tempText)) / 2;
+    int16_t tempY = 120 - (tft.fontHeight() / 2);
+    tempX += 15;
+    tempY += 20;
+    tft.drawString(tempText, tempX, tempY);
+    tft.setTextSize(1);
     drawScreenTitle("London");
+
   } else {
     Serial.println("❌ Failed to connect to OpenWeather API.");
     tft.fillScreen(TFT_BLACK);
@@ -187,19 +204,20 @@ void fetchAndDisplayLondonWeather() {
   http.end();
 }
 
-
 void fetchAndDisplayWeather() {
   HTTPClient http;
   http.begin(TEMPEST_API_URL);
   String bearer = "Bearer " + String(TEMPEST_API_KEY);
   http.addHeader("Authorization", bearer);
   int httpCode = http.GET();
-  tft.setFont(&fonts::Font4); // 🔠 Larger font
+
+  tft.setFont(&fonts::Font4);  // Just for title
 
   if (httpCode > 0) {
     String payload = http.getString();
     Serial.println("📡 Weather API Response:");
     Serial.println(payload);
+
     DynamicJsonDocument doc(4096);
     DeserializationError error = deserializeJson(doc, payload);
     if (error) {
@@ -208,36 +226,35 @@ void fetchAndDisplayWeather() {
       tft.drawString("JSON Error!", 10, 20);
       return;
     }
-    float temp_c   = doc["obs"][0]["air_temperature"].as<float>();
-    float wind_kph = doc["obs"][0]["wind_avg"].as<float>() * 3.6;
-    float pressure = doc["obs"][0]["sea_level_pressure"].as<float>();
+
+    float temp_c = doc["obs"][0]["air_temperature"].as<float>();
     float temp_f = (temp_c * 9.0 / 5.0) + 32.0;
-    float wind_d = doc["obs"][0]["wind_direction"].as<float>();
 
     tft.fillScreen(TFT_WHITE);
-    tft.setTextColor(TFT_BLUE);
     tft.setSwapBytes(true);
-    tft.pushImage(0, 0, 240, 240, background);
+    tft.pushImage(0, 0, 240, 240, background2);
+
+    tft.setTextColor(TFT_NAVY);
+    tft.setFont(&fonts::Font6);  // Big temp
+    tft.setTextSize(2);
     String tempText = String(temp_f, 1) + " F";
-    tft.drawString(tempText, 135, 82);
-    String windText = String(wind_kph, 1);
-    String winDirText = windDirFromDegrees(wind_d) ;
-    tft.drawString(windText, 135, 164); // next line
-    tft.setFont(&fonts::Font2);
-    tft.setTextColor(TFT_BLACK);
-    tft.drawString(winDirText, 175, 164); // next line
-    tft.setFont(&fonts::Font4);
-    tft.setTextColor(TFT_BLUE);
-    String pressureText = String(((pressure)* 0.145038),1) ;
-    tft.drawString(pressureText, 130, 122); // next line
+    int16_t tempX = (240 - tft.textWidth(tempText)) / 2;
+    int16_t tempY = 120 - (tft.fontHeight() / 2);
+    tempX += 15;
+    tempY += 20;
+    tft.drawString(tempText, tempX, tempY);
+    tft.setTextSize(1);
     drawScreenTitle("San Diego");
+
   } else {
     Serial.println("❌ Failed to connect to API.");
     tft.fillScreen(TFT_BLACK);
     tft.drawString("API Error!", 10, 20);
   }
+
   http.end();
 }
+
 
 
 void loop() {
